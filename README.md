@@ -1,4 +1,4 @@
-# Outbox Pattern - Implementación con Spring Boot y Kafka
+# Outbox Pattern Polling - Implementación con Spring Boot y Kafka
 
 [![Java](https://img.shields.io/badge/Java-17+-blue.svg)](https://openjdk.java.net/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.x-brightgreen.svg)](https://spring.io/projects/spring-boot)
