@@ -1,142 +1,129 @@
-# Outbox Pattern Polling - Implementación con Spring Boot y Kafka
+# Outbox Pattern con CDC (Debezium) y Apache Kafka
 
 [![Java](https://img.shields.io/badge/Java-17+-blue.svg)](https://openjdk.java.net/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.x-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Apache Kafka](https://img.shields.io/badge/Apache%20Kafka-3.7-red.svg)](https://kafka.apache.org/)
+[![Debezium](https://img.shields.io/badge/Debezium-2.5-orange.svg)](https://debezium.io/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue.svg)](https://www.postgresql.org/)
 
 ## 📋 Propósito
 
-Este proyecto implementa el **Outbox Pattern**, un patrón de diseño esencial en arquitecturas de microservicios que garantiza la **entrega confiable de eventos** en sistemas distribuidos. Su objetivo principal es resolver el problema de la **doble escritura** (Dual Write Problem) y asegurar la consistencia eventual entre la base de datos transaccional y el broker de mensajes.
+Este proyecto implementa una arquitectura de microservicios robusta basada en el **Outbox Pattern** combinado con **CDC (Change Data Capture)** utilizando Debezium.
 
-## 🎯 Problema que Resuelve
+El objetivo es garantizar la **entrega confiable de eventos** en sistemas distribuidos, resolviendo el problema de la doble escritura (Dual Write Problem), asegurando la consistencia eventual, y gestionando fallos mediante colas de cartas muertas (DLQ) e idempotencia.
 
-En arquitecturas basadas en eventos, cuando un servicio necesita:
-1. Guardar el estado de negocio en la base de datos.
-2. Publicar un evento en un message broker (Kafka, RabbitMQ, etc.) para notificar a otros servicios.
+##  Problema que Resuelve
 
-El enfoque ingenuo (hacer ambas operaciones por separado) puede causar:
-- ❌ **Pérdida de mensajes**: Si la base de datos guarda el registro pero el broker de mensajes falla o está caído.
-- ❌ **Mensajes fantasma**: Si el broker publica el evento pero la base de datos falla al guardar el registro.
-- ❌ **Inconsistencia de datos**: Estados divergentes entre los distintos microservicios.
-
-**Solución**: El Outbox Pattern garantiza que ambas operaciones (guardar el dato de negocio y el evento) sean atómicas utilizando una única transacción local de base de datos.
+En arquitecturas basadas en eventos, publicar mensajes directamente desde el servicio puede causar pérdida de datos si el broker de mensajes falla.
+1. **Outbox Pattern**: Guarda el evento en la base de datos en la misma transacción que el dato de negocio.
+2. **CDC con Debezium**: En lugar de consultar la base de datos constantemente (Polling), Debezium lee el **WAL (Write-Ahead Log)** de PostgreSQL en tiempo real (< 100ms de latencia) y publica los cambios en Kafka.
 
 ## 🏗️ Arquitectura
 
 ```text
-┌─────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│   Cliente   │────▶│   Spring Boot App    │────▶│   PostgreSQL    │
-│  (Frontend) │     │                      │     │                 │
-└─────────────┘     │  - PedidoService     │     │  - Tabla pedidos│
-                    │  - OutboxPublisher   │     │  - Tabla outbox │
-                    └──────────────────────┘     └─────────────────┘
-                                  │
-                                  │ Polling (cada 5s)
-                                  ▼
-                           ┌──────────────┐
-                           │    Kafka     │
-                           │ outbox-events│
-                           │    -topic    │
-                           ──────────────┘
+─────────────────────────────────────────────────────────────────────────┐
+│                         APLICACIÓN SPRING BOOT                          │
+│                                                                         │
+│  [REST API] ──▶ [PedidoService] ──┬──▶ Tabla: pedidos (Datos internos) │
+│                                   └──▶ Tabla: outbox_events (Buzón)     │
+─────────────────────────────────────────────────────────────────────────
+                                          │
+                                          │ (Transacción Atómica)
+                                          ▼
+─────────────────────────────────────────────────────────────────────────
+│                              POSTGRESQL                                 │
+│                                                                         │
+│  Escribe los cambios en el WAL (Write-Ahead Log) en tiempo real.        │
+└─────────────────────────────────────────────────────────────────────────┘
+                                          │
+                                          │ (Replicación Lógica / CDC)
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            DEBEZIUM (Kafka Connect)                     │
+│                                                                         │
+│  Lee el WAL, filtra la tabla 'outbox_events' y publica en Kafka.        │
+└─────────────────────────────────────────────────────────────────────────┘
+                                          │
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                               APACHE KAFKA                              │
+│                                                                         │
+│  Tópico Principal: 'outbox-events-topic'                                │
+│  Tópico DLQ: 'outbox-events-topic.DLQ' (Para mensajes fallidos)         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                          │
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         SERVICIO CONSUMIDOR                             │
+│                                                                         │
+│  [InventoryConsumer] ─▶ Verifica Idempotencia (Tabla: consumed_events) │
+│                        ──▶ Ejecuta Lógica de Negocio                    │
+│                        ──▶ Si falla ──▶ Envía a Dead Letter Queue (DLQ) │
+└─────────────────────────────────────────────────────────────────────────┘
 
+✨ Características Clave Implementadas
+Consistencia Transaccional (ACID): El pedido y el evento outbox se guardan juntos.
+CDC en Tiempo Real: Latencia de < 100ms usando el WAL de PostgreSQL (sin consultas SQL constantes).
+Consumidor Idempotente: Garantiza que un evento duplicado de Kafka no se procese dos veces.
+Dead Letter Queue (DLQ): Los mensajes que fallan al procesarse se mueven a un tópico de cuarentena para evitar bloquear el flujo principal.
+Limpieza Automática: Un proceso programado borra los eventos antiguos de la tabla outbox_events para mantener la base de datos optimizada.
+Gestión de Tópicos como Código: Los tópicos de Kafka se crean automáticamente al iniciar la aplicación.
+Tecnologías Utilizadas
+Backend: Java 17+ / Spring Boot 3.2.x
+Base de Datos: PostgreSQL 15 (Configurado con wal_level=logical)
+CDC: Debezium 2.5 (Corriendo sobre Kafka Connect)
+Message Broker: Apache Kafka 3.7 (Modo KRaft - sin ZooKeeper)
+Build Tool: Gradle
+Infraestructura: Docker & Docker Compose
+Monitoreo: Kafka UI
 🚀 Cómo Ejecutar
 Prerrequisitos
-Docker y Docker Compose instalados.
-Java 17 o superior instalado.
-Gradle (o usar el wrapper gradlew incluido en el proyecto).
+Docker y Docker Compose.
+Java 17+ y Gradle.
 Paso 1: Levantar la Infraestructura
-Abre una terminal en la raíz del proyecto y ejecuta:
-
-# Iniciar PostgreSQL, Kafka y Kafka UI
 docker-compose up -d
-
-# Verificar que los contenedores estén corriendo correctamente
-docker-compose ps
-
-Servicios disponibles:
-PostgreSQL: localhost:5432 (Usuario: admin, Contraseña: admin123, DB: outbox_db)
-Kafka Broker: localhost:29092
-Kafka UI: http://localhost:8080
-Paso 2: Ejecutar la Aplicación Spring Boot
-En otra terminal, ejecuta la aplicación:
-
-# Usando Gradle wrapper (Linux/Mac)
+ervicios: PostgreSQL (5432), Kafka (29092), Kafka Connect (8083), Kafka UI (8080).
+Paso 2: Registrar el Conector Debezium
+Una vez que los contenedores estén listos, registra el conector para que Debezium empiece a leer el WAL:
+curl -i -X POST -H "Accept:application/json" \
+  -H "Content-Type:application/json" \
+  http://localhost:8083/connectors \
+  -d @debezium-connector.json
+Paso 3: Ejecutar la Aplicación Spring Boot
 ./gradlew bootRun
-
-# Usando Gradle wrapper (Windows)
-gradlew.bat bootRun
-
-La API REST estará disponible en: http://localhost:8081
-Paso 3: Probar el Endpoint
-Envía una petición POST para crear un pedido:
-
+La API REST estará disponible en http://localhost:8081.
+🧪 Pruebas y Validación
+1. Flujo Exitoso (Happy Path)
+Crea un pedido y observa cómo Debezium lo envía a Kafka y el consumidor lo procesa en milisegundos:
 curl -X POST http://localhost:8081/api/pedidos \
 -H "Content-Type: application/json" \
--d '{
-  "cliente": "Juan Pérez",
-  "total": 350.50
-}'
-
-Paso 4: Verificar el Resultado
-Logs de Spring Boot: Espera unos 5 segundos y observa en la consola:
-Polling Publisher encontró 1 eventos pendientes de publicar.
-✅ Evento publicado en Kafka: <uuid-del-evento>
-Kafka UI: Abre tu navegador en http://localhost:8080 → Ve a Topics → outbox-events-topic → Pestaña Messages. Verás el payload JSON.
-Base de Datos: Verifica que el estado del evento cambió a PROCESSED:
-sql
-
-SELECT id, aggregate_id, event_type, estado FROM outbox_events ORDER BY created_at DESC LIMIT 1;
-
-📖 Explicación del Patrón
-Flujo de Trabajo Interno
-Transacción Atómica (@Transactional):
-
-// 1. Guardar el dato de negocio
-pedidoRepository.save(pedido);
-
-// 2. Guardar el evento en la tabla outbox con estado PENDING
-outboxEventRepository.save(evento);
-
-// ¡Gracias a @Transactional, ambos se guardan o ninguno! (ACID)
-
-Polling Publisher (@Scheduled)
-// Cada 5 segundos (configurable):
-// 1. Hacer SELECT buscando eventos con estado = PENDING
-// 2. Publicar el payload en el tópico de Kafka
-// 3. Si Kafka confirma la recepción, actualizar estado a PROCESSED
-
-Ventajas Clave de esta Implementación
-✅ Consistencia Garantizada: Las transacciones ACID eliminan el Dual Write Problem.
-✅ Entrega Confiable (At-least-once): Si Kafka está caído, el Polling reintentará automáticamente cada X segundos hasta que esté disponible.
-✅ Sin Dependencia Externa Compleja: No requiere Two-Phase Commit (2PC) ni transacciones distribuidas pesadas.
-✅ Orden Preservado: Se utiliza el aggregate_id (ID del pedido) como Key de Kafka, garantizando el orden de los eventos por entidad.
-✅ Idempotencia Preparada: El id único del evento permite a los consumidores deduplicar mensajes si se envían más de una vez.
-Consideraciones para Entornos de Producción
-Si llevas este código a producción, se recomienda implementar:
-Idempotencia en el Consumidor: El servicio que lea de Kafka debe verificar si ya procesó ese id de evento antes de ejecutar la lógica de negocio.
-Limpieza de la Tabla Outbox: Un job programado que borre o archive registros con estado PROCESSED antiguos para evitar que la tabla crezca infinitamente.
-Manejo de Concurrencia: Si escalas horizontalmente (múltiples instancias de la app), usa SELECT ... FOR UPDATE SKIP LOCKED en PostgreSQL para evitar que dos instancias procesen el mismo evento simultáneamente.
-Dead Letter Queue (DLQ): Mover a una cola de errores los mensajes que fallen después de un número máximo de reintentos.
-🔍 Configuración Importante
-application.properties
-
-# Puerto de la aplicación (cambiado a 8081 para no chocar con Kafka UI)
-server.port=8081
-
-# Conexión a PostgreSQL
-spring.datasource.url=jdbc:postgresql://localhost:5432/outbox_db
-spring.datasource.username=admin
-spring.datasource.password=admin123
-spring.jpa.hibernate.ddl-auto=update
-
-# Conexión a Kafka
-spring.kafka.bootstrap-servers=localhost:29092
-spring.kafka.producer.key-serializer=org.apache.kafka.common.serialization.StringSerializer
-spring.kafka.producer.value-serializer=org.springframework.kafka.support.serializer.JsonSerializer
-
-# Tópico de Kafka
-kafka.topic.outbox=outbox-events-topic
-
-# Intervalo de polling en milisegundos (default: 5000ms)
-outbox.polling.interval=5000
+-d '{"cliente": "Juan Pérez", "total": 150.00}'
+Verifica en Kafka UI (http://localhost:8080) que el mensaje llega al tópico principal y que la tabla consumed_events registra la idempotencia.
+2. Prueba de Dead Letter Queue (DLQ)
+Para simular un error, descomenta la línea if (Math.random() > 0.5) throw new RuntimeException(...) en InventoryConsumer.java. Al enviar pedidos, los que fallen se moverán automáticamente al tópico outbox-events-topic.DLQ.
+📦 Estructura del Proyecto
+src/main/java/com/ejemplo/outbox/
+├── config/
+│   └── KafkaTopicConfig.java          # Crea tópicos automáticamente
+├── consumer/
+│   └── InventoryConsumer.java         # Lógica de consumo, idempotencia y DLQ
+├── controller/
+│   └── PedidoController.java          # REST API
+├── entity/
+│   ├── Pedido.java                    # Entidad de negocio
+│   ├── OutboxEvent.java               # Entidad del buzón
+│   └── ConsumedEvent.java             # Entidad para idempotencia
+── publisher/
+│   └── OutboxPublisher.java           # (Opcional) Polling legacy
+├── repository/
+│   ├── PedidoRepository.java
+│   ├── OutboxEventRepository.java     # Incluye query de limpieza
+│   └── ConsumedEventRepository.java
+── service/
+    ├── PedidoService.java             # Transacción atómica
+    └── OutboxCleaner.java             # Job programado de limpieza
+📚 Recursos Adicionales
+Debezium Documentation
+Transactional Outbox Pattern
+Kafka Connect
+Proyecto desarrollado con fines educativos y de portafolio, demostrando patrones de arquitectura resiliente en microservicios.

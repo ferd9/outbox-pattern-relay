@@ -12,10 +12,21 @@ public class KafkaTopicConfig {
     @Value("${kafka.topic.outbox}")
     private String topicName;
 
+    @Value("${kafka.topic.dlq}") // Asegúrate de tener esta propiedad en tu application.properties
+    private String dlqTopicName;
+
     @Bean
     public NewTopic outboxTopic() {
-        // Crea el tópico con 1 partición y 1 factor de réplica (ideal para desarrollo local)
         return TopicBuilder.name(topicName)
+                .partitions(1)
+                .replicas(1)
+                .build();
+    }
+
+    // NUEVO: Bean para crear el tópico de la Dead Letter Queue
+    @Bean
+    public NewTopic dlqTopic() {
+        return TopicBuilder.name(dlqTopicName)
                 .partitions(1)
                 .replicas(1)
                 .build();
