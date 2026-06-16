@@ -20,6 +20,8 @@ import java.util.List;
 public class OutboxPublisher {
 
     private final OutboxEventRepository outboxEventRepository;
+
+    /*
     private final KafkaTemplate<String, String> kafkaTemplate;
 
     @Value("${kafka.topic.outbox}")
@@ -66,5 +68,5 @@ public class OutboxPublisher {
                 log.error("Excepción inesperada procesando el evento {}", event.getId(), e);
             }
         }
-    }
+    }*/
 }

@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # 1. Base de datos PostgreSQL
+  # 1. PostgreSQL Oficial con configuración para CDC
   postgres:
     image: postgres:15-alpine
     container_name: outbox-postgres
@@ -11,13 +11,26 @@ services:
       POSTGRES_DB: outbox_db
     ports:
       - "5432:5432"
+    # CONFIGURACIÓN CLAVE PARA CDC:
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - outbox-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d outbox_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-
-  # 2. Broker de mensajes Kafka (Confluent - Modo KRaft, sin Zookeeper)
+  # 2. Kafka (Tu configuración que funciona)
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     container_name: outbox-kafka
@@ -26,33 +39,49 @@ services:
       - "9092:9092"
       - "29092:29092"
     environment:
-      # Configuración KRaft (Sin Zookeeper)
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: 'broker,controller'
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
-
-      # Listeners: Define cómo escucha y cómo se anuncia
       KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:29092'
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
       KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-
-      # Configuración para desarrollo local (1 sola réplica)
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-
-      # Datos y Cluster ID
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
     volumes:
       - ./kafka-data:/tmp/kraft-combined-logs
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - outbox-network
 
-  # 3. Interfaz gráfica para ver los tópicos y mensajes de Kafka
+  # 3. Kafka Connect con Debezium (desde Quay.io)
+  connect:
+    image: quay.io/debezium/connect:2.7
+    container_name: outbox-kafka-connect
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: my_connect_configs
+      OFFSET_STORAGE_TOPIC: my_connect_offsets
+      STATUS_STORAGE_TOPIC: my_connect_statuses
+    depends_on:
+      kafka:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    networks:
+      - outbox-network
+
+  # 4. Kafka UI
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: outbox-kafka-ui
@@ -61,8 +90,10 @@ services:
     environment:
       - KAFKA_CLUSTERS_0_NAME=local-cluster
       - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+      - KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME=debezium-connect
+      - KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS=http://connect:8083
     depends_on:
-      - kafka
+      - connect
     networks:
       - outbox-network
 

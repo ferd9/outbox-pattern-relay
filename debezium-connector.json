@@ -1,0 +1,26 @@
+{
+  "name": "outbox-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "admin",
+    "database.password": "admin123",
+    "database.dbname": "outbox_db",
+    "database.server.name": "outbox-db",
+    "database.server.id": "184054",
+    "topic.prefix": "outbox-db",
+    "table.include.list": "public.outbox_events",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium_outbox_slot",
+    "publication.name": "dbz_publication",
+    "transforms": "route",
+    "transforms.route.type": "io.debezium.transforms.ByLogicalTableRouter",
+    "transforms.route.topic.regex": "(.*)outbox-db.public.outbox_events(.*)",
+    "transforms.route.topic.replacement": "outbox-events-topic",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}
