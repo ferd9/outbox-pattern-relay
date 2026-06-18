@@ -30,6 +30,21 @@ services:
       timeout: 5s
       retries: 5
 
+    # 5. Base de datos para Lectura (Read Model - CQRS)
+  mongo:
+      image: mongo:7.0
+      container_name: outbox-mongo
+      ports:
+        - "27017:27017"
+      environment:
+        MONGO_INITDB_ROOT_USERNAME: admin
+        MONGO_INITDB_ROOT_PASSWORD: admin123
+        MONGO_INITDB_DATABASE: read_db
+      volumes:
+        - mongo_data:/data/db
+      networks:
+        - outbox-network
+
   # 2. Kafka (Tu configuración que funciona)
   kafka:
     image: confluentinc/cp-kafka:7.6.0
@@ -100,6 +115,7 @@ services:
 volumes:
   postgres_data:
   kafka_data:
+  mongo_data:
 
 networks:
   outbox-network:
