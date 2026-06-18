@@ -35,6 +35,9 @@ public class OutboxEvent {
 
     private Integer reintentos;
 
+    @Column(name = "aggregate_type")
+    private String aggregateType; // Ej: "PEDIDO", "INVENTARIO", "PAGO"
+
     // Enum para los estados
     public enum EstadoOutbox {
         PENDING,

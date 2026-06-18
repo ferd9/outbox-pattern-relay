@@ -35,6 +35,7 @@ public class PedidoService {
                 .total(total)
                 .fechaCreacion(LocalDateTime.now())
                 .build();
+        pedido.setEstado(Pedido.EstadoPedido.PENDIENTE_PAGO);
         pedido = pedidoRepository.save(pedido);
 
         // 2. Crear el evento para el Outbox
@@ -54,6 +55,7 @@ public class PedidoService {
                     .build();
 
             // 3. Guardar el evento en la MISMA transacción
+            evento.setAggregateType("PEDIDO");
             outboxEventRepository.save(evento);
             log.info("Pedido y Evento Outbox guardados exitosamente en la BD.");
 
@@ -63,5 +65,25 @@ public class PedidoService {
         }
 
         return pedido;
+    }
+
+    @Transactional
+    public void publicarEventoSaga(String aggregateType, UUID aggregateId, String eventType, Object payloadData) {
+        try {
+            String payloadJson = objectMapper.writeValueAsString(payloadData);
+            OutboxEvent evento = OutboxEvent.builder()
+                    .aggregateType(aggregateType)
+                    .aggregateId(aggregateId)
+                    .eventType(eventType)
+                    .payload(payloadJson)
+                    .estado(OutboxEvent.EstadoOutbox.PENDING)
+                    .createdAt(LocalDateTime.now())
+                    .reintentos(0)
+                    .build();
+            outboxEventRepository.save(evento);
+            log.info("Evento Saga {} publicado para {}: {}", eventType, aggregateType, aggregateId);
+        } catch (Exception e) {
+            throw new RuntimeException("Error al publicar evento Saga", e);
+        }
     }
 }

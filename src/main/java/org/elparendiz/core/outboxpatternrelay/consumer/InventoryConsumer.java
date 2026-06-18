@@ -1,5 +1,6 @@
 package org.elparendiz.core.outboxpatternrelay.consumer;
 
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -22,51 +23,74 @@ public class InventoryConsumer {
 
     private final ConsumedEventRepository consumedEventRepository;
     private final ObjectMapper objectMapper;
-    private final KafkaTemplate<String, String> kafkaTemplate; // Inyectamos el template
+    private final KafkaTemplate<String, String> kafkaTemplate;
 
     @Value("${kafka.topic.dlq}")
     private String dlqTopicName;
 
-    @KafkaListener(topics = "outbox-events-topic", groupId = "inventory-service-group")
+    /*@KafkaListener(topics = "outbox-events-topic", groupId = "inventory-service-group")
     @Transactional
     public void consumeEvent(String message) {
         try {
-            // 1. Parsear el envelope de Debezium
+            // 1. Validar que el mensaje no sea nulo
+            if (message == null || message.trim().isEmpty()) {
+                log.warn("⚠️ Mensaje nulo o vacío recibido. Ignorando.");
+                return;
+            }
+
+            // 2. Parsear el envelope de Debezium
             JsonNode root = objectMapper.readTree(message);
             JsonNode after = root.get("after");
 
-            if (after == null) {
-                log.warn(" Mensaje ignorado (operación DELETE o sin datos 'after')");
+            // 3. Validar que exista el campo "after" (los DELETEs no lo tienen)
+            if (after == null || after.isNull()) {
+                log.warn("⚠️ Mensaje ignorado (operación DELETE o sin datos 'after')");
                 return;
             }
 
-            // 2. Extraer el ID del evento Outbox (para idempotencia)
-            String outboxEventIdStr = after.get("id").asText();
+            // 4. Validar que exista el campo "id"
+            JsonNode idNode = after.get("id");
+            if (idNode == null || idNode.isNull()) {
+                log.warn("⚠️ Mensaje ignorado (no tiene campo 'id')");
+                return;
+            }
+
+            // 5. Extraer el ID del evento Outbox (para idempotencia)
+            String outboxEventIdStr = idNode.asText();
             UUID outboxEventId = UUID.fromString(outboxEventIdStr);
 
-            // 3. VERIFICAR IDEMPOTENCIA
+            // 6. VERIFICAR IDEMPOTENCIA: ¿Ya procesamos este evento?
             if (consumedEventRepository.existsByOutboxEventId(outboxEventId)) {
-                log.info(" Evento DUPLICADO detectado (ID: {}). Ignorando.", outboxEventId);
+                log.info("ℹ️ Evento DUPLICADO detectado (ID: {}). Ignorando para evitar reprocesamiento.", outboxEventId);
                 return;
             }
 
-            // 4. Extraer los datos de negocio
-            String businessPayloadStr = after.get("payload").asText();
+            // 7. Validar que exista el campo "payload"
+            JsonNode payloadNode = after.get("payload");
+            if (payloadNode == null || payloadNode.isNull()) {
+                log.warn("⚠️ Mensaje ignorado (no tiene campo 'payload')");
+                return;
+            }
+
+            // 8. Extraer los datos de negocio (el payload que guardamos en Spring Boot)
+            String businessPayloadStr = payloadNode.asText();
             JsonNode businessPayload = objectMapper.readTree(businessPayloadStr);
+
+            // 9. Validar campos del payload
+            if (!businessPayload.has("pedidoId") || !businessPayload.has("cliente") || !businessPayload.has("total")) {
+                log.warn("⚠️ Payload incompleto. Faltan campos requeridos.");
+                return;
+            }
 
             String pedidoId = businessPayload.get("pedidoId").asText();
             String cliente = businessPayload.get("cliente").asText();
             double total = businessPayload.get("total").asDouble();
 
-            // 5. LÓGICA DE NEGOCIO (Simulación)
-            log.info(" [INVENTARIO] Procesando pedido {} para cliente {}. Total: ${}", pedidoId, cliente, total);
+            // 10. EJECUTAR LÓGICA DE NEGOCIO (Simulación de Inventario)
+            log.info("📦 [INVENTARIO] Procesando pedido {} para cliente {}. Total: ${}", pedidoId, cliente, total);
+            log.info("✅ [INVENTARIO] Stock reservado exitosamente para el pedido {}", pedidoId);
 
-            // Simulemos un error aleatorio para probar la DLQ (Descomenta la siguiente línea para probar)
-            //if (Math.random() > 0.5) throw new RuntimeException("Error simulado de inventario");
-
-            log.info(" [INVENTARIO] Stock reservado exitosamente para el pedido {}", pedidoId);
-
-            // 6. GUARDAR REGISTRO DE IDEMPOTENCIA
+            // 11. GUARDAR REGISTRO DE IDEMPOTENCIA
             ConsumedEvent consumedEvent = ConsumedEvent.builder()
                     .outboxEventId(outboxEventId)
                     .aggregateId(UUID.fromString(pedidoId))
@@ -74,18 +98,19 @@ public class InventoryConsumer {
                     .build();
 
             consumedEventRepository.save(consumedEvent);
+            log.info("💾 Evento {} marcado como procesado en la base de datos.", outboxEventId);
 
         } catch (Exception e) {
-            // 7. MANEJO DE ERRORES Y DLQ
-            log.error(" Error fatal procesando el mensaje. Enviando a Dead Letter Queue (DLQ). Motivo: {}", e.getMessage());
+            // 12. MANEJO DE ERRORES Y DLQ
+            log.error("❌ Error fatal procesando el mensaje. Enviando a Dead Letter Queue (DLQ). Motivo: {}", e.getMessage());
 
             try {
                 // Enviamos el mensaje original (el JSON de Debezium) a la DLQ para poder inspeccionarlo después
                 kafkaTemplate.send(dlqTopicName, message);
-                log.info(" Mensaje enviado exitosamente a la DLQ: {}", dlqTopicName);
+                log.info("📩 Mensaje enviado exitosamente a la DLQ: {}", dlqTopicName);
             } catch (Exception ex) {
-                log.error(" CRÍTICO: No se pudo enviar el mensaje a la DLQ. El mensaje se perderá. Error: {}", ex.getMessage());
+                log.error("💀 CRÍTICO: No se pudo enviar el mensaje a la DLQ. El mensaje se perderá. Error: {}", ex.getMessage());
             }
         }
-    }
+    }*/
 }

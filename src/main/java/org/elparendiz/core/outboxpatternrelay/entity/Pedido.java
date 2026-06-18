@@ -21,4 +21,11 @@ public class Pedido {
     private String cliente;
     private BigDecimal total;
     private LocalDateTime fechaCreacion;
+
+    @Enumerated(EnumType.STRING)
+    private EstadoPedido estado;
+    
+    public enum EstadoPedido {
+        PENDIENTE_PAGO, CONFIRMADO, CANCELADO
+    }
 }
