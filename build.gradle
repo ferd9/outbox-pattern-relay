@@ -1,16 +1,19 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.5.15'
-    id 'io.spring.dependency-management' version '1.1.7'
+    id 'org.springframework.boot' version '3.2.0'
+    id 'io.spring.dependency-management' version '1.1.4'
 }
 
-group = 'org.elparendiz.core'
+group = 'com.ejemplo'
 version = '0.0.1-SNAPSHOT'
-description = 'outbox-pattern-relay'
 
 java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+    sourceCompatibility = '17'
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
     }
 }
 
@@ -19,19 +22,50 @@ repositories {
 }
 
 dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-web'
-    implementation 'org.springframework.kafka:spring-kafka'
-    compileOnly 'org.projectlombok:lombok'
-    runtimeOnly 'org.postgresql:postgresql'
-    annotationProcessor 'org.projectlombok:lombok'
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testImplementation 'org.springframework.kafka:spring-kafka-test'
-    testCompileOnly 'org.projectlombok:lombok'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    testAnnotationProcessor 'org.projectlombok:lombok'
-    // NUEVO: Para la base de datos de lectura (CQRS)
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // Kafka
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // Lombok
+    compileOnly 'org.projectlombok:lombok:1.18.34'
+    annotationProcessor 'org.projectlombok:lombok:1.18.34'
+
+    // PostgreSQL
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // Jackson
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // ============ TEST DEPENDENCIES ============
+
+    // Spring Boot Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+
+    // Spring Kafka Test
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+
+    // Mockito
+    testImplementation 'org.mockito:mockito-core:5.14.2'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.14.2'
+
+    // Testcontainers 2.0.5 - NUEVOS NOMBRES DE ARTIFACTS
+    def testcontainersVersion = '2.0.5'
+    testImplementation "org.testcontainers:testcontainers-junit-jupiter:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers-postgresql:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers-mongodb:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers-kafka:${testcontainersVersion}"
+
+    // Awaitility
+    testImplementation 'org.awaitility:awaitility:4.2.2'
+
+    // Lombok en tests
+    testCompileOnly 'org.projectlombok:lombok:1.18.34'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.34'
 }
 
 tasks.named('test') {
