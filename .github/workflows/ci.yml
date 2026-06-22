@@ -1,0 +1,42 @@
+name: CI Pipeline - Outbox Pattern & CQRS
+
+on:
+  push:
+    branches:
+      - test/demo-testcontainer
+  pull_request:
+    branches:
+      - test/demo-testcontainer
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Give execution permission to Gradle wrapper
+        run: chmod +x ./gradlew
+
+      - name: Run Tests
+        run: ./gradlew test
+
+      - name: Build Application
+        run: ./gradlew build -x test
+
+      - name: Upload Test Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: build/reports/tests/test/
